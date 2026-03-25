@@ -17,6 +17,7 @@ struct TvFileConfig {
 #[derive(Deserialize)]
 struct SpotifyFileConfig {
     tv_device_name: String,
+    tv_app_id: Option<String>,
 }
 
 pub struct TvConfig {
@@ -27,6 +28,7 @@ pub struct TvConfig {
 pub struct SpotifyConfig {
     pub refresh_token: String,
     pub tv_device_name: String,
+    pub tv_app_id: String,
 }
 
 fn get_secret(key: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -63,6 +65,7 @@ pub fn load_spotify() -> Result<SpotifyConfig, Box<dyn std::error::Error>> {
     Ok(SpotifyConfig {
         refresh_token,
         tv_device_name: sp.tv_device_name,
+        tv_app_id: sp.tv_app_id.unwrap_or_else(|| "3201606009684".to_string()),
     })
 }
 
