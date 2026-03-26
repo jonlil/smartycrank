@@ -34,28 +34,30 @@ enum Command {
     },
     /// Authorize with Spotify (opens browser for PKCE OAuth flow)
     Auth,
-    /// Launch Spotify on TV with a deep link (e.g. spotify:track:xxx, spotify:album:xxx)
-    Play {
-        /// Spotify URI (e.g. spotify:track:4cOdK2wGLETKBW3PvgPWqT)
+    /// Launch an app on TV with a deep link (e.g. spotify:track:xxx, spotify:album:xxx)
+    Launch {
+        /// Deep link URI (e.g. spotify:track:4cOdK2wGLETKBW3PvgPWqT)
         uri: String,
     },
-    /// Launch a hockey match on TV4 Play
-    Hockey {
+    /// Control viska (TV4 Play)
+    #[command(subcommand)]
+    Viska(ViskaCommand),
+}
+
+#[derive(Subcommand)]
+enum ViskaCommand {
+    /// Play an asset on TV4 Play
+    Play {
         /// TV4 Play asset ID
         asset_id: String,
     },
-    /// Seek to a position in current TV4 Play playback (e.g. "1:30:00", "45:00", "+60", "-30")
+    /// Seek to a position in current playback (e.g. "1:30:00", "45:00", "+60", "-30")
     Seek {
         /// Time position: "H:MM:SS", "MM:SS", "+seconds", "-seconds"
         position: String,
     },
-    /// Pair TV4 Tizen app with tokens from tv4play.se login JSON
-    Pair {
-        /// Access token
-        access_token: String,
-        /// Refresh token
-        refresh_token: String,
-    },
+    /// Log out of TV4 Play
+    Logout,
 }
 
 fn parse_timestamp(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
@@ -103,14 +105,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             spotify::auth().await?;
             return Ok(());
         }
-        Command::Play { ref uri } => {
+        Command::Launch { ref uri } => {
             let tv_cfg = config::load_tv()?;
             let tv = tv::SamsungTv::new(&tv_cfg);
             let sp_cfg = config::load_spotify()?;
             tv.launch_app(&sp_cfg.tv_app_id, uri).await?;
             return Ok(());
         }
-        Command::Hockey { ref asset_id } => {
+        Command::Viska(ref cmd) => {
             let tv_cfg = config::load_tv()?;
             let tv = tv::SamsungTv::new(&tv_cfg);
             if !tv.is_on().await {
@@ -118,39 +120,33 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
             tv.ensure_app_running("tv4tizenap.App").await?;
-            tv.send_to_channel(
-                "tv4tizenap.App",
-                "play",
-                serde_json::json!({"assetId": asset_id}),
-            ).await?;
-            return Ok(());
-        }
-        Command::Pair { ref access_token, ref refresh_token } => {
-            let tv_cfg = config::load_tv()?;
-            let tv = tv::SamsungTv::new(&tv_cfg);
-            if !tv.is_on().await {
-                return Err("TV is off or unreachable".into());
+            match cmd {
+                ViskaCommand::Play { asset_id } => {
+                    tv.send_to_channel(
+                        "tv4tizenap.App",
+                        "play",
+                        serde_json::json!({"assetId": asset_id}),
+                    ).await?;
+                }
+                ViskaCommand::Seek { position } => {
+                    let data = if position.starts_with('+') || position.starts_with('-') {
+                        let secs: i64 = position.parse().map_err(|_| "Invalid relative offset")?;
+                        serde_json::json!({"relative": secs})
+                    } else {
+                        let ms = parse_timestamp(position)?;
+                        serde_json::json!({"position": ms})
+                    };
+                    tv.send_to_channel("tv4tizenap.App", "seek", data).await?;
+                }
+                ViskaCommand::Logout => {
+                    tv.send_to_channel(
+                        "tv4tizenap.App",
+                        "logout",
+                        serde_json::json!({}),
+                    ).await?;
+                    eprintln!("Logged out");
+                }
             }
-            tv.ensure_app_running("tv4tizenap.App").await?;
-            tv.send_to_channel(
-                "tv4tizenap.App",
-                "pair",
-                serde_json::json!({"access_token": access_token, "refresh_token": refresh_token}),
-            ).await?;
-            eprintln!("Paired!");
-            return Ok(());
-        }
-        Command::Seek { ref position } => {
-            let tv_cfg = config::load_tv()?;
-            let tv = tv::SamsungTv::new(&tv_cfg);
-            let data = if position.starts_with('+') || position.starts_with('-') {
-                let secs: i64 = position.parse().map_err(|_| "Invalid relative offset")?;
-                serde_json::json!({"relative": secs})
-            } else {
-                let ms = parse_timestamp(position)?;
-                serde_json::json!({"position": ms})
-            };
-            tv.send_to_channel("tv4tizenap.App", "seek", data).await?;
             return Ok(());
         }
         _ => {}
