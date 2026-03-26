@@ -50,7 +50,17 @@ enum ViskaCommand {
     Play {
         /// TV4 Play asset ID
         asset_id: String,
+        /// Start from beginning (ignore resume position)
+        #[arg(long)]
+        restart: bool,
+        /// Jump to live edge
+        #[arg(long)]
+        live: bool,
     },
+    /// Pause current playback
+    Pause,
+    /// Resume current playback
+    Resume,
     /// Seek to a position in current playback (e.g. "1:30:00", "45:00", "+60", "-30")
     Seek {
         /// Time position: "H:MM:SS", "MM:SS", "+seconds", "-seconds"
@@ -59,6 +69,8 @@ enum ViskaCommand {
     /// Log out of TV4 Play
     Logout,
 }
+
+const VISKA_APP_ID: &str = "viskaTizen.App";
 
 fn parse_timestamp(s: &str) -> Result<u64, Box<dyn std::error::Error>> {
     let parts: Vec<&str> = s.split(':').collect();
@@ -119,14 +131,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("TV is off or unreachable");
                 std::process::exit(1);
             }
-            tv.ensure_app_running("tv4tizenap.App").await?;
+            tv.ensure_app_running(VISKA_APP_ID).await?;
             match cmd {
-                ViskaCommand::Play { asset_id } => {
-                    tv.send_to_channel(
-                        "tv4tizenap.App",
-                        "play",
-                        serde_json::json!({"assetId": asset_id}),
-                    ).await?;
+                ViskaCommand::Play { asset_id, restart, live } => {
+                    let action = if *restart {
+                        Some("restart")
+                    } else if *live {
+                        Some("live")
+                    } else {
+                        None
+                    };
+                    let mut data = serde_json::json!({"assetId": asset_id});
+                    if let Some(a) = action {
+                        data["action"] = serde_json::json!(a);
+                    }
+                    tv.send_to_channel(VISKA_APP_ID, "play", data).await?;
+                }
+                ViskaCommand::Pause => {
+                    tv.send_to_channel(VISKA_APP_ID, "pause", serde_json::json!({})).await?;
+                }
+                ViskaCommand::Resume => {
+                    tv.send_to_channel(VISKA_APP_ID, "resume", serde_json::json!({})).await?;
                 }
                 ViskaCommand::Seek { position } => {
                     let data = if position.starts_with('+') || position.starts_with('-') {
@@ -136,11 +161,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let ms = parse_timestamp(position)?;
                         serde_json::json!({"position": ms})
                     };
-                    tv.send_to_channel("tv4tizenap.App", "seek", data).await?;
+                    tv.send_to_channel(VISKA_APP_ID, "seek", data).await?;
                 }
                 ViskaCommand::Logout => {
                     tv.send_to_channel(
-                        "tv4tizenap.App",
+                        VISKA_APP_ID,
                         "logout",
                         serde_json::json!({}),
                     ).await?;
