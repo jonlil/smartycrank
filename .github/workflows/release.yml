@@ -18,9 +18,6 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: smartycrank-macos-aarch64
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact: smartycrank-macos-x86_64
 
     runs-on: ${{ matrix.os }}
 
@@ -63,4 +60,3 @@ jobs:
           files: |
             smartycrank-linux-x86_64/smartycrank-linux-x86_64.tar.gz
             smartycrank-macos-aarch64/smartycrank-macos-aarch64.tar.gz
-            smartycrank-macos-x86_64/smartycrank-macos-x86_64.tar.gz
