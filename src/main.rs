@@ -13,6 +13,10 @@ struct Cli {
     /// Skip Spotify check and always send command
     #[arg(long, short, global = true)]
     force: bool,
+
+    /// TV profile name or IP address (overrides default)
+    #[arg(long, global = true)]
+    tv: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -118,14 +122,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         Command::Launch { ref uri } => {
-            let tv_cfg = config::load_tv()?;
+            let tv_cfg = config::load_tv(cli.tv.as_deref())?;
             let tv = tv::SamsungTv::new(&tv_cfg);
             let sp_cfg = config::load_spotify()?;
             tv.launch_app(&sp_cfg.tv_app_id, uri).await?;
             return Ok(());
         }
         Command::Viska(ref cmd) => {
-            let tv_cfg = config::load_tv()?;
+            let tv_cfg = config::load_tv(cli.tv.as_deref())?;
             let tv = tv::SamsungTv::new(&tv_cfg);
             if !tv.is_on().await {
                 eprintln!("TV is off or unreachable");
@@ -177,7 +181,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     }
 
-    let tv_cfg = config::load_tv()?;
+    let tv_cfg = config::load_tv(cli.tv.as_deref())?;
     let tv = tv::SamsungTv::new(&tv_cfg);
 
     if !cli.force {

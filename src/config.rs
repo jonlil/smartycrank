@@ -1,12 +1,22 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 const SERVICE: &str = "smartycrank";
 
 #[derive(Deserialize)]
 struct FileConfig {
-    tv: TvFileConfig,
+    /// Legacy single-TV config
+    tv: Option<TvFileConfig>,
+    /// Named TV profiles
+    tvs: Option<HashMap<String, TvFileConfig>>,
+    default: Option<DefaultConfig>,
     spotify: Option<SpotifyFileConfig>,
+}
+
+#[derive(Deserialize)]
+struct DefaultConfig {
+    tv: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -49,13 +59,42 @@ fn load_file() -> Result<FileConfig, Box<dyn std::error::Error>> {
     Ok(toml::from_str(&content)?)
 }
 
-pub fn load_tv() -> Result<TvConfig, Box<dyn std::error::Error>> {
+pub fn load_tv(tv_arg: Option<&str>) -> Result<TvConfig, Box<dyn std::error::Error>> {
     let file = load_file()?;
+    let host = resolve_tv_host(&file, tv_arg)?;
     let token = get_secret("tv-token")?;
-    Ok(TvConfig {
-        host: file.tv.host,
-        token,
-    })
+    Ok(TvConfig { host, token })
+}
+
+fn resolve_tv_host(file: &FileConfig, tv_arg: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+    let tvs = file.tvs.as_ref();
+
+    // --tv flag provided: look up as profile name first, then treat as raw IP/host
+    if let Some(arg) = tv_arg {
+        if let Some(tvs) = tvs {
+            if let Some(tv) = tvs.get(arg) {
+                return Ok(tv.host.clone());
+            }
+        }
+        return Ok(arg.to_string());
+    }
+
+    // No --tv flag: check default.tv, then fall back to legacy [tv] section
+    if let Some(default_name) = file.default.as_ref().and_then(|d| d.tv.as_deref()) {
+        if let Some(tvs) = tvs {
+            if let Some(tv) = tvs.get(default_name) {
+                return Ok(tv.host.clone());
+            }
+            return Err(format!("default tv '{}' not found in [tvs]", default_name).into());
+        }
+    }
+
+    // Legacy [tv] section
+    if let Some(tv) = &file.tv {
+        return Ok(tv.host.clone());
+    }
+
+    Err("No TV configured. Add [tv] or [tvs] section to config.toml".into())
 }
 
 pub fn load_spotify() -> Result<SpotifyConfig, Box<dyn std::error::Error>> {
