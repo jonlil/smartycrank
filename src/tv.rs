@@ -20,6 +20,43 @@ impl SamsungTv {
         }
     }
 
+    pub async fn pair(host: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let name = STANDARD.encode(APP_NAME);
+        let url = format!(
+            "wss://{}:8002/api/v2/channels/samsung.remote.control?name={}",
+            host, name
+        );
+
+        let connector = native_tls::TlsConnector::builder()
+            .danger_accept_invalid_certs(true)
+            .build()?;
+        let connector = tokio_tungstenite::Connector::NativeTls(connector);
+
+        eprintln!("Connecting to TV at {}...", host);
+        eprintln!("Please accept the connection on your TV when prompted.");
+
+        let (mut ws, _) = tokio_tungstenite::connect_async_tls_with_config(
+            &url, None, false, Some(connector),
+        )
+        .await?;
+
+        // The TV sends a response containing the token
+        let msg = ws.next().await
+            .ok_or("No response from TV")??;
+
+        let response: serde_json::Value = serde_json::from_str(
+            msg.to_text().map_err(|_| "Non-text response from TV")?
+        )?;
+
+        let token = response
+            .get("data")
+            .and_then(|d| d.get("token"))
+            .and_then(|t| t.as_str())
+            .ok_or("TV response did not contain a token")?;
+
+        Ok(token.to_string())
+    }
+
     pub async fn is_on(&self) -> bool {
         let url = format!("http://{}:8001/api/v2/", self.host);
         let client = reqwest::Client::builder()

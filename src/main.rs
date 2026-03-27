@@ -36,6 +36,8 @@ enum Command {
         /// The secret value
         value: String,
     },
+    /// Pair with Samsung TV (stores WebSocket token in keyring)
+    Pair,
     /// Authorize with Spotify (opens browser for PKCE OAuth flow)
     Auth,
     /// Launch an app on TV with a deep link (e.g. spotify:track:xxx, spotify:album:xxx)
@@ -115,6 +117,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Command::StoreSecret { key, value } => {
             config::store_secret(&key, &value)?;
             println!("Stored '{key}' in keyring");
+            return Ok(());
+        }
+        Command::Pair => {
+            let host = config::load_tv_host(cli.tv.as_deref())?;
+            let token = tv::SamsungTv::pair(&host).await?;
+            config::store_secret("tv-token", &token)?;
+            eprintln!("Paired! Token stored in keyring.");
             return Ok(());
         }
         Command::Auth => {

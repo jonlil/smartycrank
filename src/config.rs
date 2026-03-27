@@ -59,9 +59,13 @@ fn load_file() -> Result<FileConfig, Box<dyn std::error::Error>> {
     Ok(toml::from_str(&content)?)
 }
 
-pub fn load_tv(tv_arg: Option<&str>) -> Result<TvConfig, Box<dyn std::error::Error>> {
+pub fn load_tv_host(tv_arg: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     let file = load_file()?;
-    let host = resolve_tv_host(&file, tv_arg)?;
+    resolve_tv_host(&file, tv_arg)
+}
+
+pub fn load_tv(tv_arg: Option<&str>) -> Result<TvConfig, Box<dyn std::error::Error>> {
+    let host = load_tv_host(tv_arg)?;
     let token = get_secret("tv-token")?;
     Ok(TvConfig { host, token })
 }
