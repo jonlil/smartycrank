@@ -13,7 +13,7 @@ const CLIENT_ID: &str = "40c148a5aa614c38b6032a73ba2f030f";
 const REDIRECT_URI: &str = "http://127.0.0.1:8913/callback";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const PLAYER_URL: &str = "https://api.spotify.com/v1/me/player";
-const SCOPES: &str = "user-read-playback-state";
+const SCOPES: &str = "user-read-playback-state user-modify-playback-state";
 const TOKEN_MARGIN_SECS: u64 = 300; // refresh 5 min before expiry
 
 #[derive(Serialize, Deserialize)]
@@ -128,6 +128,52 @@ impl Spotify {
         Self::save_cached_token(&token.access_token, expires_in);
 
         Ok(token.access_token)
+    }
+
+    pub async fn transfer_to_tv(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let token = self.get_access_token().await?;
+
+        // Get available devices
+        let resp = self.client
+            .get(format!("{}/devices", PLAYER_URL))
+            .bearer_auth(&token)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Spotify API error: {text}").into());
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let devices = body["devices"].as_array()
+            .ok_or("No devices array in response")?;
+
+        let tv_device = devices.iter()
+            .find(|d| d["name"].as_str() == Some(&self.tv_device_name))
+            .ok_or_else(|| format!("TV '{}' not found among Spotify devices", self.tv_device_name))?;
+
+        let device_id = tv_device["id"].as_str()
+            .ok_or("Device has no ID")?;
+
+        // Transfer playback
+        let resp = self.client
+            .put(PLAYER_URL)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({
+                "device_ids": [device_id],
+                "play": true
+            }))
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Failed to transfer playback: {text}").into());
+        }
+
+        eprintln!("Playback transferred to {}", self.tv_device_name);
+        Ok(())
     }
 
     pub async fn is_playing_on_tv(&self) -> Result<bool, Box<dyn std::error::Error>> {

@@ -112,17 +112,34 @@ impl SamsungTv {
         let msg = ws.next().await
             .ok_or("No response from TV")??;
 
-        let response: serde_json::Value = serde_json::from_str(
-            msg.to_text().map_err(|_| "Non-text response from TV")?
-        )?;
+        let text = msg.to_text().map_err(|_| "Non-text response from TV")?;
+        let response: serde_json::Value = serde_json::from_str(text)?;
 
-        let token = response
-            .get("data")
-            .and_then(|d| d.get("token"))
-            .and_then(|t| t.as_str())
-            .ok_or("TV response did not contain a token")?;
+        // If already paired, TV sends event "ms.channel.connect" with token=None
+        // Try to get token; if missing, read next message (TV may send token after prompt)
+        if let Some(token) = response.get("data").and_then(|d| d.get("token")).and_then(|t| t.as_str()) {
+            if !token.is_empty() {
+                return Ok(token.to_string());
+            }
+        }
 
-        Ok(token.to_string())
+        eprintln!("Waiting for TV to send token (accept on TV if prompted)...");
+
+        // Try reading additional messages (TV may send token in a follow-up)
+        while let Some(msg) = ws.next().await {
+            let msg = msg?;
+            if let Ok(text) = msg.to_text() {
+                if let Ok(response) = serde_json::from_str::<serde_json::Value>(text) {
+                    if let Some(token) = response.get("data").and_then(|d| d.get("token")).and_then(|t| t.as_str()) {
+                        if !token.is_empty() {
+                            return Ok(token.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("TV did not send a token. Try removing 'smartycrank' from the TV's device list and pair again.".into())
     }
 
     pub async fn is_on(&self) -> bool {

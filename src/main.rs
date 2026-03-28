@@ -45,6 +45,8 @@ enum Command {
         /// Deep link URI (e.g. spotify:track:4cOdK2wGLETKBW3PvgPWqT)
         uri: String,
     },
+    /// Transfer Spotify playback to the TV
+    SpotifyPlay,
     /// Power on/off the TV
     #[command(subcommand)]
     Power(PowerCommand),
@@ -141,6 +143,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
             config::store_secret(&key, &token)?;
             eprintln!("Paired! Token stored in keyring as '{}'.", key);
+            return Ok(());
+        }
+        Command::SpotifyPlay => {
+            let sp_cfg = config::load_spotify()?;
+            let sp = spotify::Spotify::new(&sp_cfg);
+            sp.transfer_to_tv().await?;
             return Ok(());
         }
         Command::Power(ref cmd) => {
