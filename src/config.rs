@@ -19,9 +19,20 @@ struct DefaultConfig {
     tv: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum WakeMethod {
+    Wol,
+    Smartthings,
+}
+
+#[derive(Deserialize, Clone)]
 struct TvFileConfig {
     host: String,
+    mac: Option<String>,
+    bind_addr: Option<String>,
+    wake: Option<WakeMethod>,
+    smartthings_device_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -32,7 +43,12 @@ struct SpotifyFileConfig {
 
 pub struct TvConfig {
     pub host: String,
-    pub token: String,
+    pub token: Option<String>,
+    pub mac: Option<String>,
+    pub bind_addr: Option<String>,
+    pub wake: Option<WakeMethod>,
+    pub smartthings_device_id: Option<String>,
+    pub smartthings_token: Option<String>,
 }
 
 pub struct SpotifyConfig {
@@ -61,33 +77,66 @@ fn load_file() -> Result<FileConfig, Box<dyn std::error::Error>> {
 
 pub fn load_tv_host(tv_arg: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     let file = load_file()?;
-    resolve_tv_host(&file, tv_arg)
+    let (tv_file, _) = resolve_tv_file_config(&file, tv_arg)?;
+    Ok(tv_file.host)
+}
+
+/// Returns (host, Option<profile_name>) for pairing
+pub fn load_tv_profile(tv_arg: Option<&str>) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
+    let file = load_file()?;
+    let (tv_file, profile_name) = resolve_tv_file_config(&file, tv_arg)?;
+    Ok((tv_file.host, profile_name))
 }
 
 pub fn load_tv(tv_arg: Option<&str>) -> Result<TvConfig, Box<dyn std::error::Error>> {
-    let host = load_tv_host(tv_arg)?;
-    let token = get_secret("tv-token")?;
-    Ok(TvConfig { host, token })
+    let file = load_file()?;
+    let (tv_file, profile_name) = resolve_tv_file_config(&file, tv_arg)?;
+
+    // Try per-TV token first, fall back to legacy "tv-token" key
+    let token = if let Some(ref name) = profile_name {
+        get_secret(&format!("tv-token:{}", name))
+            .or_else(|_| get_secret("tv-token"))
+            .ok()
+    } else {
+        get_secret("tv-token").ok()
+    };
+
+    let smartthings_token = if tv_file.smartthings_device_id.is_some() {
+        get_secret("smartthings-token").ok()
+    } else {
+        None
+    };
+
+    Ok(TvConfig {
+        host: tv_file.host,
+        token,
+        mac: tv_file.mac,
+        bind_addr: tv_file.bind_addr,
+        wake: tv_file.wake,
+        smartthings_device_id: tv_file.smartthings_device_id,
+        smartthings_token,
+    })
 }
 
-fn resolve_tv_host(file: &FileConfig, tv_arg: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+/// Returns (TvFileConfig, Option<profile_name>)
+fn resolve_tv_file_config(file: &FileConfig, tv_arg: Option<&str>) -> Result<(TvFileConfig, Option<String>), Box<dyn std::error::Error>> {
     let tvs = file.tvs.as_ref();
 
     // --tv flag provided: look up as profile name first, then treat as raw IP/host
     if let Some(arg) = tv_arg {
         if let Some(tvs) = tvs {
             if let Some(tv) = tvs.get(arg) {
-                return Ok(tv.host.clone());
+                return Ok((tv.clone(), Some(arg.to_string())));
             }
         }
-        return Ok(arg.to_string());
+        return Ok((TvFileConfig { host: arg.to_string(), mac: None, bind_addr: None, wake: None, smartthings_device_id: None }, None));
     }
 
     // No --tv flag: check default.tv, then fall back to legacy [tv] section
     if let Some(default_name) = file.default.as_ref().and_then(|d| d.tv.as_deref()) {
         if let Some(tvs) = tvs {
             if let Some(tv) = tvs.get(default_name) {
-                return Ok(tv.host.clone());
+                return Ok((tv.clone(), Some(default_name.to_string())));
             }
             return Err(format!("default tv '{}' not found in [tvs]", default_name).into());
         }
@@ -95,7 +144,7 @@ fn resolve_tv_host(file: &FileConfig, tv_arg: Option<&str>) -> Result<String, Bo
 
     // Legacy [tv] section
     if let Some(tv) = &file.tv {
-        return Ok(tv.host.clone());
+        return Ok((tv.clone(), None));
     }
 
     Err("No TV configured. Add [tv] or [tvs] section to config.toml".into())

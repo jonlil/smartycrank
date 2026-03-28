@@ -45,6 +45,11 @@ enum Command {
         /// Deep link URI (e.g. spotify:track:4cOdK2wGLETKBW3PvgPWqT)
         uri: String,
     },
+    /// Power on/off the TV
+    #[command(subcommand)]
+    Power(PowerCommand),
+    /// Discover the TV's MAC address for Wake-on-LAN
+    Discover,
     /// Control viska (TV4 Play)
     #[command(subcommand)]
     Viska(ViskaCommand),
@@ -74,6 +79,14 @@ enum ViskaCommand {
     },
     /// Log out of TV4 Play
     Logout,
+}
+
+#[derive(Subcommand)]
+enum PowerCommand {
+    /// Turn the TV on via Wake-on-LAN
+    On,
+    /// Turn the TV off
+    Off,
 }
 
 const VISKA_APP_ID: &str = "viskaTizen.App";
@@ -120,10 +133,36 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
         Command::Pair => {
-            let host = config::load_tv_host(cli.tv.as_deref())?;
+            let (host, profile_name) = config::load_tv_profile(cli.tv.as_deref())?;
             let token = tv::SamsungTv::pair(&host).await?;
-            config::store_secret("tv-token", &token)?;
-            eprintln!("Paired! Token stored in keyring.");
+            let key = match &profile_name {
+                Some(name) => format!("tv-token:{}", name),
+                None => "tv-token".to_string(),
+            };
+            config::store_secret(&key, &token)?;
+            eprintln!("Paired! Token stored in keyring as '{}'.", key);
+            return Ok(());
+        }
+        Command::Power(ref cmd) => {
+            let tv_cfg = config::load_tv(cli.tv.as_deref())?;
+            let tv = tv::SamsungTv::new(&tv_cfg);
+            match cmd {
+                PowerCommand::On => tv.power_on().await?,
+                PowerCommand::Off => tv.power_off().await?,
+            }
+            return Ok(());
+        }
+        Command::Discover => {
+            let host = config::load_tv_host(cli.tv.as_deref())?;
+            let mac = tv::SamsungTv::discover(&host)?;
+            println!("Found MAC address: {}", mac);
+            println!();
+            println!("Add to config.toml:");
+            println!("  mac = \"{}\"", mac);
+            println!();
+            println!("For Wake-on-LAN to work on Samsung TVs, enable:");
+            println!("  Settings > General > Network > Expert Settings > Power On with Mobile");
+            println!("  (On some models: Settings > General > Network > Wake on LAN)");
             return Ok(());
         }
         Command::Auth => {
