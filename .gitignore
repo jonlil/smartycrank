@@ -1,1 +1,4 @@
 /target
+.claude/
+pkg/
+*.pkg.tar.zst
